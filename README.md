@@ -5,6 +5,19 @@ every change in a SQLite database so you can review history and diffs later.
 
 ## Quick start
 
+Install the latest release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/abronte/chronicle/refs/heads/main/scripts/install.sh | bash
+```
+
+By default this installs `chronicle` to `$HOME/.local/bin`. To install somewhere
+else, set `CHRONICLE_INSTALL_DIR`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/abronte/chronicle/refs/heads/main/scripts/install.sh | CHRONICLE_INSTALL_DIR=/usr/local/bin bash
+```
+
 ```sh
 # Watch for changes (starts the watcher in the current directory)
 go run ./cmd/chronicle
