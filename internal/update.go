@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -24,7 +25,7 @@ func CheckUpdate(currentVersion string) (string, error) {
 	}
 
 	latest := strings.TrimPrefix(release.TagName, "v")
-	if latest == currentVersion {
+	if compareVersions(latest, currentVersion) <= 0 {
 		return "", nil
 	}
 
@@ -67,7 +68,7 @@ func InstallUpdate(currentVersion string) error {
 	}
 
 	latest := strings.TrimPrefix(rel.TagName, "v")
-	if latest == currentVersion {
+	if compareVersions(latest, currentVersion) <= 0 {
 		return fmt.Errorf("already up to date (%s)", currentVersion)
 	}
 
@@ -128,4 +129,25 @@ func InstallUpdate(currentVersion string) error {
 	}
 
 	return nil
+}
+
+func compareVersions(a, b string) int {
+	aparts := strings.Split(a, ".")
+	bparts := strings.Split(b, ".")
+	for i := 0; i < 3; i++ {
+		var av, bv int
+		if i < len(aparts) {
+			av, _ = strconv.Atoi(aparts[i])
+		}
+		if i < len(bparts) {
+			bv, _ = strconv.Atoi(bparts[i])
+		}
+		if av < bv {
+			return -1
+		}
+		if av > bv {
+			return 1
+		}
+	}
+	return 0
 }
