@@ -62,6 +62,14 @@ Shows the last 5 diffs for a given file.
 chronicle diffs path/to/file.go
 ```
 
+### `update`
+
+Downloads the latest release from GitHub and replaces the current binary.
+
+```
+chronicle update
+```
+
 ### `help`
 
 Prints usage information.
