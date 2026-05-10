@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build and upload release binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate release tag
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match vX.X.X"
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+
+          build_target() {
+            local goos="$1"
+            local goarch="$2"
+            local output="$3"
+
+            GOOS="${goos}" GOARCH="${goarch}" go build \
+              -trimpath \
+              -ldflags "-s -w" \
+              -o "dist/${output}" \
+              ./cmd/chronicle
+          }
+
+          build_target linux amd64 chronicle-linux-amd64
+          build_target linux arm64 chronicle-linux-arm64
+          build_target darwin arm64 chronicle-darwin-arm64
+          build_target windows amd64 chronicle-windows-amd64.exe
+
+      - name: Upload binaries to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
