@@ -14,6 +14,16 @@ import (
 
 const repo = "abronte/chronicle"
 
+type release struct {
+	TagName string  `json:"tag_name"`
+	Assets  []asset `json:"assets"`
+}
+
+type asset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
 func CheckUpdate(currentVersion string) (string, error) {
 	release, err := getLatestRelease()
 	if err != nil {
@@ -30,16 +40,6 @@ func CheckUpdate(currentVersion string) (string, error) {
 	}
 
 	return release.TagName, nil
-}
-
-type release struct {
-	TagName string  `json:"tag_name"`
-	Assets  []asset `json:"assets"`
-}
-
-type asset struct {
-	Name               string `json:"name"`
-	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
 func getLatestRelease() (*release, error) {
