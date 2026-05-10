@@ -24,6 +24,12 @@ func main() {
 }
 
 func run(args []string, stdout io.Writer) error {
+	go func() {
+		if latest, err := internal.CheckUpdate(version); err == nil && latest != "" {
+			fmt.Fprintf(os.Stderr, "A new version is available: %s\n", latest)
+		}
+	}()
+
 	cmd := "watch"
 	cmdArgs := args
 
@@ -42,6 +48,8 @@ func run(args []string, stdout io.Writer) error {
 		return runRecent(cmdArgs, stdout)
 	case "diffs":
 		return runDiffs(cmdArgs, stdout)
+	case "update":
+		return runUpdate(cmdArgs, stdout)
 	default:
 		printHelp(stdout)
 		return fmt.Errorf("unknown command: %s", cmd)
@@ -54,6 +62,7 @@ func printHelp(stdout io.Writer) {
 	fmt.Fprintln(stdout, "  watch    Watch files for changes (default)")
 	fmt.Fprintln(stdout, "  recent   Show last 10 files changed")
 	fmt.Fprintln(stdout, "  diffs    Show last 5 diffs for a file")
+	fmt.Fprintln(stdout, "  update   Download and install the latest version")
 	fmt.Fprintln(stdout, "  help     Print this help")
 	fmt.Fprintln(stdout, "\nOptions:")
 	fmt.Fprintln(stdout, "  -version, -v  Print version and exit")
@@ -173,6 +182,25 @@ func runRecent(args []string, stdout io.Writer) error {
 		t := time.UnixMilli(c.CreatedAt).Format("2006-01-02 15:04:05")
 		fmt.Fprintf(stdout, "%s  %s\n", t, c.FilePath)
 	}
+	return nil
+}
+
+func runUpdate(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("chronicle update", flag.ContinueOnError)
+	flags.SetOutput(stdout)
+	flags.Usage = func() {
+		fmt.Fprintf(flags.Output(), "Usage: chronicle update\n\n")
+		fmt.Fprintln(flags.Output(), "Check for and install the latest version of chronicle.")
+	}
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(stdout, "Checking for updates...\n")
+	if err := internal.InstallUpdate(version); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "Updated to the latest version.\n")
 	return nil
 }
 
