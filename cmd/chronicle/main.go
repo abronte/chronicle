@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,6 +105,9 @@ func runWatch(args []string, stdout io.Writer) error {
 		return err
 	}
 
+	watchDir, _ := filepath.Abs(".")
+	log.Printf("watching directory: %s", watchDir)
+
 	for {
 		select {
 		case event, ok := <-watcher.Events:
@@ -137,7 +141,7 @@ func runWatch(args []string, stdout io.Writer) error {
 					continue
 				}
 				if sha != "" {
-					fmt.Fprintf(stdout, "%s  %s\n", sha[:8], event.Name)
+					log.Printf("%s (%s)", event.Name, sha[:8])
 				}
 			}
 			if event.Op&fsnotify.Create == fsnotify.Create && isDir {
