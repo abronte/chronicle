@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"chronicle/internal"
 	"strings"
 	"testing"
 )
@@ -52,7 +53,7 @@ func TestRunUnknownCommand(t *testing.T) {
 
 func TestRunWatchVersionShortFlag(t *testing.T) {
 	var buf bytes.Buffer
-	err := runWatch([]string{"-v"}, &buf)
+	err := internal.Watch([]string{"-v"}, &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestRunWatchVersionShortFlag(t *testing.T) {
 
 func TestRunWatchVersionLongFlag(t *testing.T) {
 	var buf bytes.Buffer
-	err := runWatch([]string{"-version"}, &buf)
+	err := internal.Watch([]string{"-version"}, &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
