@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"chronicle/internal"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -57,7 +58,8 @@ func TestRunWatchVersionShortFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(buf.String(), "chronicle 0.2.2") {
+	expected := fmt.Sprintf("chronicle %s", internal.Version)
+	if !strings.Contains(buf.String(), expected) {
 		t.Errorf("expected version output, got: %s", buf.String())
 	}
 }
@@ -68,7 +70,8 @@ func TestRunWatchVersionLongFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(buf.String(), "chronicle 0.2.2") {
+	expected := fmt.Sprintf("chronicle %s", internal.Version)
+	if !strings.Contains(buf.String(), expected) {
 		t.Errorf("expected version output, got: %s", buf.String())
 	}
 }
@@ -79,7 +82,8 @@ func TestRunWatchVersionViaRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(buf.String(), "chronicle 0.2.2") {
+	expected := fmt.Sprintf("chronicle %s", internal.Version)
+	if !strings.Contains(buf.String(), expected) {
 		t.Errorf("expected version output, got: %s", buf.String())
 	}
 }
@@ -101,7 +105,8 @@ func TestRunDefaultIsWatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(buf.String(), "chronicle 0.2.2") {
+	expected := fmt.Sprintf("chronicle %s", internal.Version)
+	if !strings.Contains(buf.String(), expected) {
 		t.Errorf("expected version output for default watch command, got: %s", buf.String())
 	}
 }

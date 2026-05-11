@@ -13,7 +13,7 @@ import (
 )
 
 var ignorePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(^|/)\.`),
+	regexp.MustCompile(`(^|/)\.([^/]+)`),
 	regexp.MustCompile(`(^|/)node_modules(/|$)`),
 }
 
