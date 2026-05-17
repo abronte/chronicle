@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -8,18 +9,26 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/fsnotify/fsnotify"
 )
 
 var ignorePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(^|/)\.([^/]+)`),
-	regexp.MustCompile(`(^|/)node_modules(/|$)`),
 }
 
+var gitignorePatterns []*regexp.Regexp
+
 func shouldIgnore(path string) bool {
+	clean := strings.TrimPrefix(path, "./")
 	for _, re := range ignorePatterns {
-		if re.MatchString(path) {
+		if re.MatchString(clean) {
+			return true
+		}
+	}
+	for _, re := range gitignorePatterns {
+		if re.MatchString(clean) {
 			return true
 		}
 	}
@@ -49,6 +58,10 @@ func Watch(args []string, stdout io.Writer) error {
 	}
 
 	if err := InitializeDB("."); err != nil {
+		return err
+	}
+
+	if err := loadGitignore("."); err != nil {
 		return err
 	}
 
@@ -114,6 +127,67 @@ func Watch(args []string, stdout io.Writer) error {
 			return err
 		}
 	}
+}
+
+func loadGitignore(root string) error {
+	f, err := os.Open(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
+			continue
+		}
+		re := gitignoreToRegex(line)
+		if re != nil {
+			gitignorePatterns = append(gitignorePatterns, re)
+		}
+	}
+	return scanner.Err()
+}
+
+func gitignoreToRegex(pattern string) *regexp.Regexp {
+	if strings.HasPrefix(pattern, "!") {
+		return nil
+	}
+
+	dirOnly := strings.HasSuffix(pattern, "/")
+	pattern = strings.TrimRight(pattern, "/")
+
+	anchored := strings.HasPrefix(pattern, "/")
+	pattern = strings.TrimPrefix(pattern, "/")
+
+	if pattern == "" {
+		return nil
+	}
+
+	escaped := regexp.QuoteMeta(pattern)
+	escaped = strings.ReplaceAll(escaped, `\*\*/`, `__DSLASH__`)
+	escaped = strings.ReplaceAll(escaped, `\*\*`, `.*`)
+	escaped = strings.ReplaceAll(escaped, `__DSLASH__`, `(.*/)?`)
+	escaped = strings.ReplaceAll(escaped, `\*`, `[^/]*`)
+	escaped = strings.ReplaceAll(escaped, `\?`, `[^/]`)
+
+	var prefix string
+	if anchored {
+		prefix = `^`
+	} else {
+		prefix = `^(.*/)?`
+	}
+
+	suffix := `$`
+	if dirOnly {
+		suffix = `(/.*)?$`
+	}
+
+	return regexp.MustCompile(prefix + escaped + suffix)
 }
 
 func addDirsRecursive(watcher *fsnotify.Watcher, root string) error {
