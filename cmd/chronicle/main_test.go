@@ -99,6 +99,32 @@ func TestRunDiffsNoFile(t *testing.T) {
 	}
 }
 
+func TestDiffForCLIShowsDeletedFile(t *testing.T) {
+	older := internal.FileChange{Data: "hello\n"}
+	newer := internal.FileChange{Data: "hello\n", ChangeType: internal.ChangeTypeDelete}
+
+	diff, oldPath, newPath := diffForCLI("note.txt", older, newer)
+	if oldPath != "note.txt" || newPath != "/dev/null" {
+		t.Fatalf("expected delete paths, got %q -> %q", oldPath, newPath)
+	}
+	if !strings.Contains(diff, "-hello") {
+		t.Fatalf("expected delete diff, got:\n%s", diff)
+	}
+}
+
+func TestDiffForCLIShowsRecreatedFile(t *testing.T) {
+	older := internal.FileChange{Data: "hello\n", ChangeType: internal.ChangeTypeDelete}
+	newer := internal.FileChange{Data: "hello\n", ChangeType: internal.ChangeTypeModify}
+
+	diff, oldPath, newPath := diffForCLI("note.txt", older, newer)
+	if oldPath != "/dev/null" || newPath != "note.txt" {
+		t.Fatalf("expected recreate paths, got %q -> %q", oldPath, newPath)
+	}
+	if !strings.Contains(diff, "+hello") {
+		t.Fatalf("expected add diff, got:\n%s", diff)
+	}
+}
+
 func TestRunDefaultIsWatch(t *testing.T) {
 	var buf bytes.Buffer
 	err := run([]string{"-v"}, &buf)

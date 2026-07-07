@@ -27,6 +27,115 @@ func TestWatchHelpFlag(t *testing.T) {
 	}
 }
 
+func TestHandleEventRecordsEmptyFileCreation(t *testing.T) {
+	setupTestDB(t)
+
+	root := t.TempDir()
+	filePath := filepath.Join(root, "empty.txt")
+	if err := os.WriteFile(filePath, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := &watchState{
+		roots: map[string]*watchedRoot{
+			root: {path: root},
+		},
+		watchedDirs: map[string]string{},
+	}
+
+	var buf bytes.Buffer
+	state.HandleEvent(fsnotify.Event{Name: filePath, Op: fsnotify.Create}, &buf)
+
+	changes, err := GetFileHistoryForDirectory(root, "empty.txt", 10)
+	if err != nil {
+		t.Fatalf("GetFileHistoryForDirectory failed: %v", err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change for empty file creation, got %d", len(changes))
+	}
+	if changes[0].Data != "" {
+		t.Fatalf("expected empty data, got %q", changes[0].Data)
+	}
+}
+
+func TestHandleEventRecordsKnownFileDeletion(t *testing.T) {
+	setupTestDB(t)
+
+	root := t.TempDir()
+	filePath := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(filePath, []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	originalSHA, err := AddChangeForDirectory(root, filePath, "hello\n")
+	if err != nil {
+		t.Fatalf("AddChangeForDirectory failed: %v", err)
+	}
+	if err := os.Remove(filePath); err != nil {
+		t.Fatal(err)
+	}
+
+	state := &watchState{
+		roots: map[string]*watchedRoot{
+			root: {path: root},
+		},
+		watchedDirs: map[string]string{},
+	}
+
+	var buf bytes.Buffer
+	state.HandleEvent(fsnotify.Event{Name: filePath, Op: fsnotify.Remove}, &buf)
+
+	changes, err := GetFileHistoryForDirectory(root, "note.txt", 10)
+	if err != nil {
+		t.Fatalf("GetFileHistoryForDirectory failed: %v", err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("expected 2 changes, got %d", len(changes))
+	}
+	if changes[0].ChangeType != ChangeTypeDelete {
+		t.Fatalf("expected latest change type %q, got %q", ChangeTypeDelete, changes[0].ChangeType)
+	}
+	if changes[0].Previous != originalSHA {
+		t.Fatalf("expected previous sha %q, got %q", originalSHA, changes[0].Previous)
+	}
+	if changes[0].Data != "hello\n" {
+		t.Fatalf("expected delete row to retain data, got %q", changes[0].Data)
+	}
+}
+
+func TestHandleEventSkipsDeletedWatchedDirectory(t *testing.T) {
+	setupTestDB(t)
+
+	root := t.TempDir()
+	subdir := filepath.Join(root, "sub")
+	if err := os.Mkdir(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	state := &watchState{
+		roots: map[string]*watchedRoot{
+			root: {path: root},
+		},
+		watchedDirs: map[string]string{
+			root:   root,
+			subdir: root,
+		},
+	}
+
+	var buf bytes.Buffer
+	state.HandleEvent(fsnotify.Event{Name: subdir, Op: fsnotify.Remove}, &buf)
+
+	if _, ok := state.watchedDirs[subdir]; ok {
+		t.Fatal("expected deleted directory to be removed from watched directories")
+	}
+	changes, err := GetDirectoryChanges(root, 10)
+	if err != nil {
+		t.Fatalf("GetDirectoryChanges failed: %v", err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("expected no file changes for deleted directory, got %d", len(changes))
+	}
+}
+
 func TestAddDirsRecursive(t *testing.T) {
 	dir := t.TempDir()
 
