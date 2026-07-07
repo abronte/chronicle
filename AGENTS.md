@@ -46,6 +46,7 @@ gofmt -w ./cmd/chronicle
 - Run `gofmt` on changed Go files before finishing.
 - Run `go test ./...` after code changes.
 - use go-libsql for the database
+- run the web server on port 12346 when developing
 
 ## Git And Files
 

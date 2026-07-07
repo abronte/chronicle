@@ -1,0 +1,232 @@
+{{define "home"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Chronicle</a>
+    <span class="muted">System-wide file history</span>
+  </header>
+  <main class="shell">
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h1>Monitored Directories</h1>
+          <p>Chronicle watches these roots and stores their text-file changes in the central history database.</p>
+        </div>
+      </div>
+      {{if .Error}}<p class="notice error">{{.Error}}</p>{{end}}
+      <form class="add-form" action="/directories" method="post">
+        <label for="path">Directory path</label>
+        <div class="form-row">
+          <input id="path" name="path" type="text" placeholder="{{.CurrentPath}}" autocomplete="off" required>
+          <button type="submit">Add</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <h2>Active Roots</h2>
+      </div>
+      {{if .Directories}}
+      <div class="directory-list">
+        {{range .Directories}}
+        <div class="directory-item">
+          <a class="path-link" href="/history?dir={{urlquery .Path}}">{{.Path}}</a>
+          <form action="/directories/delete" method="post">
+            <input type="hidden" name="path" value="{{.Path}}">
+            <button class="secondary danger" type="submit">Delete</button>
+          </form>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="empty">No directories are monitored yet.</p>
+      {{end}}
+    </section>
+  </main>
+</body>
+</html>
+{{end}}
+
+{{define "directory"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Chronicle</a>
+    <a class="nav-link" href="/">Directories</a>
+  </header>
+  <main class="shell">
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h1>{{base .Directory}}</h1>
+          <p class="path-text">{{.Directory}}</p>
+        </div>
+      </div>
+      {{if .Error}}<p class="notice error">{{.Error}}</p>{{end}}
+    </section>
+
+    <section class="two-column">
+      <div class="panel">
+        <div class="section-heading">
+          <h2>Changed Files</h2>
+        </div>
+        {{if .Files}}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>File</th><th>Last Change</th></tr>
+            </thead>
+            <tbody>
+            {{range .Files}}
+              <tr>
+                <td><a href="/file?dir={{urlquery $.Directory}}&file={{urlquery .FilePath}}">{{.FilePath}}</a>{{if eq .ChangeType "delete"}}<span class="status delete">Deleted</span>{{end}}</td>
+                <td class="nowrap">{{formatTime .CreatedAt}}</td>
+              </tr>
+            {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{else}}
+        <p class="empty">No file changes recorded for this directory.</p>
+        {{end}}
+      </div>
+
+      <div class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>Change History</h2>
+            <p>Newest first</p>
+          </div>
+        </div>
+        {{if .Changes}}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Time</th><th>File</th><th>Version</th></tr>
+            </thead>
+            <tbody>
+            {{range .Changes}}
+              <tr>
+                <td class="nowrap">{{formatTime .CreatedAt}}</td>
+                <td><a href="/file?dir={{urlquery $.Directory}}&file={{urlquery .FilePath}}&change={{.ID}}">{{.FilePath}}</a></td>
+                <td><span class="sha">{{shortSHA .SHA}}</span>{{if eq .ChangeType "delete"}}<span class="status delete">Deleted</span>{{end}}</td>
+              </tr>
+            {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{else}}
+        <p class="empty">No chronological history is available yet.</p>
+        {{end}}
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}
+
+{{define "file"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Chronicle</a>
+    <a class="nav-link" href="/history?dir={{urlquery .Directory}}">Directory History</a>
+  </header>
+  <main class="shell">
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h1>{{base .FilePath}}</h1>
+          <p class="path-text">{{.Directory}} / {{.FilePath}}</p>
+        </div>
+      </div>
+      {{if .Error}}<p class="notice error">{{.Error}}</p>{{end}}
+    </section>
+
+    <section class="file-layout">
+      <aside class="panel history-list">
+        <div class="section-heading">
+          <h2>File Versions</h2>
+        </div>
+        {{if .Changes}}
+        <nav aria-label="File versions">
+          {{range .Changes}}
+          <a class="version-link {{if eq .ID $.SelectedID}}selected{{end}}" href="/file?dir={{urlquery $.Directory}}&file={{urlquery $.FilePath}}&change={{.ID}}">
+            <span>{{formatTime .CreatedAt}}</span>
+            <span><span class="sha">{{shortSHA .SHA}}</span>{{if eq .ChangeType "delete"}}<span class="status delete">Deleted</span>{{end}}</span>
+          </a>
+          {{end}}
+        </nav>
+        {{else}}
+        <p class="empty">No history recorded for this file.</p>
+        {{end}}
+      </aside>
+
+      <section class="panel diff-panel">
+        <div class="section-heading">
+          <h2>{{if .ShowFull}}Full File{{else}}Diff Viewer{{end}}</h2>
+          {{if .SelectedID}}
+          {{if .ShowFull}}
+          <a class="view-button secondary" href="/file?dir={{urlquery .Directory}}&file={{urlquery .FilePath}}&change={{.SelectedID}}">Show Diff</a>
+          {{else}}
+          <a class="view-button secondary" href="/file?dir={{urlquery .Directory}}&file={{urlquery .FilePath}}&change={{.SelectedID}}&view=full">Show Full</a>
+          {{end}}
+          {{end}}
+        </div>
+        {{if .ShowFull}}
+        {{if .FullLines}}
+        <pre class="diff full-file">{{range .FullLines}}<span class="full-line"><span class="diff-gutter new">{{.Number}}</span><span class="diff-code">{{.Code}}</span></span>{{end}}</pre>
+        {{else}}
+        <p class="empty">The archived file was empty at this version.</p>
+        {{end}}
+        {{else}}
+        {{if .DiffData}}
+        <div id="diff-viewer" class="diff-viewer"></div>
+        <script type="module">
+          import { FileDiff } from "https://esm.sh/@pierre/diffs@1.2.12?standalone";
+
+          const diffData = {{json .DiffData}};
+          const diff = new FileDiff({
+            theme: "pierre-light",
+            diffStyle: "unified",
+            overflow: "wrap",
+          });
+
+          diff.render({
+            oldFile: diffData.oldFile,
+            newFile: diffData.newFile,
+            containerWrapper: document.getElementById("diff-viewer"),
+          });
+        </script>
+        {{else}}
+        <p class="empty">No text diff is available for this version.</p>
+        {{end}}
+        {{end}}
+      </section>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

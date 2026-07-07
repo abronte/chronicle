@@ -56,8 +56,8 @@ func TestIsAscii(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ok {
-			t.Error("expected false for empty file")
+		if !ok {
+			t.Error("expected true for empty text file")
 		}
 	})
 

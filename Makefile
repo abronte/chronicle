@@ -7,7 +7,7 @@ build:
 	go build -o $(BIN) $(SRC)
 
 run:
-	go run $(SRC)
+	go run $(SRC) -addr :12346
 
 test:
 	go test ./...

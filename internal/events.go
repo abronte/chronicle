@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -21,18 +23,31 @@ var ignorePatterns = []*regexp.Regexp{
 var gitignorePatterns []*regexp.Regexp
 
 func shouldIgnore(path string) bool {
-	clean := strings.TrimPrefix(path, "./")
+	clean := filepath.ToSlash(strings.TrimPrefix(path, "./"))
+	return shouldIgnoreRelative(clean, gitignorePatterns)
+}
+
+func shouldIgnoreRelative(path string, patterns []*regexp.Regexp) bool {
+	clean := filepath.ToSlash(strings.TrimPrefix(path, "./"))
 	for _, re := range ignorePatterns {
 		if re.MatchString(clean) {
 			return true
 		}
 	}
-	for _, re := range gitignorePatterns {
+	for _, re := range patterns {
 		if re.MatchString(clean) {
 			return true
 		}
 	}
 	return false
+}
+
+func shouldIgnoreForRoot(root, path string, patterns []*regexp.Regexp) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." {
+		return false
+	}
+	return shouldIgnoreRelative(rel, patterns)
 }
 
 func Watch(args []string, stdout io.Writer) error {
@@ -41,6 +56,8 @@ func Watch(args []string, stdout io.Writer) error {
 
 	showVersion := flags.Bool("version", false, "print version and exit")
 	flags.BoolVar(showVersion, "v", false, "print version and exit")
+	webEnabled := flags.Bool("web", true, "start web interface")
+	webAddr := flags.String("addr", DefaultWebAddress, "web server address")
 
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), "Usage: chronicle watch [options]\n\n")
@@ -57,11 +74,11 @@ func Watch(args []string, stdout io.Writer) error {
 		return nil
 	}
 
-	if err := InitializeDB("."); err != nil {
+	if err := InitializeCentralDB(); err != nil {
 		return err
 	}
 
-	if err := loadGitignore("."); err != nil {
+	if _, err := LoadConfig(); err != nil {
 		return err
 	}
 
@@ -71,12 +88,29 @@ func Watch(args []string, stdout io.Writer) error {
 	}
 	defer watcher.Close()
 
-	if err := addDirsRecursive(watcher, "."); err != nil {
-		return err
+	state := newWatchState(watcher)
+	reload := func() {
+		cfg, err := LoadConfig()
+		if err != nil {
+			fmt.Fprintf(stdout, "chronicle: load config: %v\n", err)
+			return
+		}
+		if err := state.Sync(cfg.Directories); err != nil {
+			fmt.Fprintf(stdout, "chronicle: sync watched directories: %v\n", err)
+		}
+	}
+	reload()
+
+	serverErr := make(chan error, 1)
+	if *webEnabled {
+		go func() {
+			serverErr <- ServeWeb(*webAddr)
+		}()
+		log.Printf("web interface listening on http://localhost%s", *webAddr)
 	}
 
-	watchDir, _ := filepath.Abs(".")
-	log.Printf("watching directory: %s", watchDir)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -84,61 +118,43 @@ func Watch(args []string, stdout io.Writer) error {
 			if !ok {
 				return nil
 			}
-			if event.Op&fsnotify.Remove == fsnotify.Remove {
-				continue
-			}
-			if shouldIgnore(event.Name) {
-				continue
-			}
-			info, err := os.Stat(event.Name)
-			isDir := err == nil && info.IsDir()
-			if !isDir {
-				size, err := GetFileSize(event.Name)
-				if err != nil {
-					continue
-				}
-				if size > 5*1024*1024 {
-					continue
-				}
-				ascii, err := IsAscii(event.Name)
-				if err != nil || !ascii {
-					continue
-				}
-				data, err := os.ReadFile(event.Name)
-				if err != nil {
-					continue
-				}
-				sha, err := AddChange(event.Name, string(data))
-				if err != nil {
-					fmt.Fprintf(stdout, "chronicle: %v\n", err)
-					continue
-				}
-				if sha != "" {
-					log.Printf("%s (%s)", event.Name, sha[:8])
-				}
-			}
-			if event.Op&fsnotify.Create == fsnotify.Create && isDir {
-				_ = addDirsRecursive(watcher, event.Name)
-			}
+			state.HandleEvent(event, stdout)
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return nil
 			}
 			return err
+		case err := <-serverErr:
+			if err != nil {
+				return err
+			}
+			return nil
+		case <-ticker.C:
+			reload()
 		}
 	}
 }
 
 func loadGitignore(root string) error {
+	patterns, err := loadGitignorePatterns(root)
+	if err != nil {
+		return err
+	}
+	gitignorePatterns = append(gitignorePatterns, patterns...)
+	return nil
+}
+
+func loadGitignorePatterns(root string) ([]*regexp.Regexp, error) {
 	f, err := os.Open(filepath.Join(root, ".gitignore"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 	defer f.Close()
 
+	var patterns []*regexp.Regexp
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -147,10 +163,13 @@ func loadGitignore(root string) error {
 		}
 		re := gitignoreToRegex(line)
 		if re != nil {
-			gitignorePatterns = append(gitignorePatterns, re)
+			patterns = append(patterns, re)
 		}
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return patterns, nil
 }
 
 func gitignoreToRegex(pattern string) *regexp.Regexp {
@@ -191,16 +210,244 @@ func gitignoreToRegex(pattern string) *regexp.Regexp {
 }
 
 func addDirsRecursive(watcher *fsnotify.Watcher, root string) error {
+	return addDirsRecursiveWithPatterns(watcher, root, gitignorePatterns)
+}
+
+func addDirsRecursiveWithPatterns(watcher *fsnotify.Watcher, root string, patterns []*regexp.Regexp) error {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
 		if info.IsDir() {
-			if shouldIgnore(path) {
+			if shouldIgnoreForRoot(root, path, patterns) {
 				return filepath.SkipDir
 			}
 			return watcher.Add(path)
 		}
 		return nil
 	})
+}
+
+type watchedRoot struct {
+	path     string
+	patterns []*regexp.Regexp
+}
+
+type watchState struct {
+	watcher     *fsnotify.Watcher
+	roots       map[string]*watchedRoot
+	watchedDirs map[string]string
+}
+
+func newWatchState(watcher *fsnotify.Watcher) *watchState {
+	return &watchState{
+		watcher:     watcher,
+		roots:       map[string]*watchedRoot{},
+		watchedDirs: map[string]string{},
+	}
+}
+
+func (s *watchState) Sync(dirs []string) error {
+	targets := map[string]bool{}
+	var firstErr error
+
+	for _, dir := range dirs {
+		normalized, err := NormalizeDirectoryPath(dir, true)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		targets[normalized] = true
+	}
+
+	for root := range s.roots {
+		if !targets[root] {
+			s.removeRoot(root)
+		}
+	}
+
+	var ordered []string
+	for root := range targets {
+		ordered = append(ordered, root)
+	}
+	slices.Sort(ordered)
+	for _, root := range ordered {
+		if _, ok := s.roots[root]; ok {
+			continue
+		}
+		if err := s.addRoot(root); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
+}
+
+func (s *watchState) addRoot(root string) error {
+	patterns, err := loadGitignorePatterns(root)
+	if err != nil {
+		return fmt.Errorf("load gitignore for %s: %w", root, err)
+	}
+	watched := &watchedRoot{path: root, patterns: patterns}
+	s.roots[root] = watched
+	if err := s.addDirsRecursive(watched, root); err != nil {
+		return err
+	}
+	log.Printf("watching directory: %s", root)
+	return nil
+}
+
+func (s *watchState) removeRoot(root string) {
+	for dir, owner := range s.watchedDirs {
+		if owner != root {
+			continue
+		}
+		_ = s.watcher.Remove(dir)
+		delete(s.watchedDirs, dir)
+	}
+	delete(s.roots, root)
+	log.Printf("stopped watching directory: %s", root)
+}
+
+func (s *watchState) addDirsRecursive(root *watchedRoot, start string) error {
+	start, err := filepath.Abs(start)
+	if err != nil {
+		return err
+	}
+	return filepath.Walk(start, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			return nil
+		}
+		if shouldIgnoreForRoot(root.path, path, root.patterns) {
+			return filepath.SkipDir
+		}
+		if err := s.watcher.Add(path); err != nil {
+			return err
+		}
+		s.watchedDirs[path] = root.path
+		return nil
+	})
+}
+
+func (s *watchState) rootForPath(path string) *watchedRoot {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil
+	}
+
+	var best *watchedRoot
+	for _, root := range s.roots {
+		if !isInsideRoot(root.path, path) {
+			continue
+		}
+		if best == nil || len(root.path) > len(best.path) {
+			best = root
+		}
+	}
+	return best
+}
+
+func (s *watchState) HandleEvent(event fsnotify.Event, stdout io.Writer) {
+	root := s.rootForPath(event.Name)
+	if root == nil || shouldIgnoreForRoot(root.path, event.Name, root.patterns) {
+		return
+	}
+
+	if event.Op&fsnotify.Remove == fsnotify.Remove || event.Op&fsnotify.Rename == fsnotify.Rename {
+		s.handleDeleteEvent(root, event.Name, stdout)
+		return
+	}
+
+	info, err := os.Stat(event.Name)
+	if err != nil {
+		return
+	}
+	if info.IsDir() {
+		if event.Op&fsnotify.Create == fsnotify.Create {
+			_ = s.addDirsRecursive(root, event.Name)
+		}
+		return
+	}
+
+	size, err := GetFileSize(event.Name)
+	if err != nil || size > 5*1024*1024 {
+		return
+	}
+	ascii, err := IsAscii(event.Name)
+	if err != nil || !ascii {
+		return
+	}
+	data, err := os.ReadFile(event.Name)
+	if err != nil {
+		return
+	}
+	sha, err := AddChangeForDirectory(root.path, event.Name, string(data))
+	if err != nil {
+		fmt.Fprintf(stdout, "chronicle: %v\n", err)
+		return
+	}
+	if sha != "" {
+		rel, _, _ := normalizeTrackedFilePath(root.path, event.Name)
+		log.Printf("%s (%s)", filepath.Join(root.path, filepath.FromSlash(rel)), sha[:8])
+	}
+}
+
+func (s *watchState) handleDeleteEvent(root *watchedRoot, path string, stdout io.Writer) {
+	if s.isWatchedDir(path) {
+		s.removeWatchedDirTree(path)
+		return
+	}
+
+	sha, err := AddDeleteForDirectory(root.path, path)
+	if err != nil {
+		fmt.Fprintf(stdout, "chronicle: %v\n", err)
+		return
+	}
+	if sha != "" {
+		rel, _, _ := normalizeTrackedFilePath(root.path, path)
+		log.Printf("%s deleted (%s)", filepath.Join(root.path, filepath.FromSlash(rel)), sha[:8])
+	}
+}
+
+func (s *watchState) isWatchedDir(path string) bool {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	_, ok := s.watchedDirs[path]
+	return ok
+}
+
+func (s *watchState) removeWatchedDirTree(path string) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return
+	}
+	for dir := range s.watchedDirs {
+		if !isInsideRoot(path, dir) {
+			continue
+		}
+		if s.watcher != nil {
+			_ = s.watcher.Remove(dir)
+		}
+		delete(s.watchedDirs, dir)
+	}
+}
+
+func isInsideRoot(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." && !filepath.IsAbs(rel))
 }

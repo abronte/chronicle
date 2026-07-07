@@ -1,7 +1,8 @@
 # Chronicle
 
-A local file change tracker. Chronicles watches your project files and stores
-every change in a SQLite database so you can review history and diffs later.
+A system-wide file change tracker. Chronicle watches the directories you
+configure, stores text-file changes in a central libSQL database, and includes a
+web UI for managing watched directories and reviewing history.
 
 ## Quick start
 
@@ -18,8 +19,22 @@ else, set `CHRONICLE_INSTALL_DIR`:
 curl -fsSL https://raw.githubusercontent.com/abronte/chronicle/refs/heads/main/scripts/install.sh | CHRONICLE_INSTALL_DIR=/usr/local/bin bash
 ```
 
+Install and start Chronicle as a macOS service:
+
 ```sh
-# Watch for changes (starts the watcher in the current directory)
+scripts/install-macos-service.sh
+```
+
+The service is installed as a user LaunchAgent, starts immediately, and starts
+again at login. It defaults to `chronicle watch`; pass Chronicle arguments after
+`--` to override that:
+
+```sh
+scripts/install-macos-service.sh -- --addr :12346
+```
+
+```sh
+# Watch configured directories and serve the web UI
 go run ./cmd/chronicle
 ```
 
@@ -37,8 +52,11 @@ go build -o bin/chronicle ./cmd/chronicle
 
 ### `watch` (default)
 
-Starts a file watcher that records every ASCII text file change (under 5 MB)
-to `.chronicle/history.db`. Hidden directories (`.`-prefixed) are skipped.
+Starts file watchers for every directory listed in
+`~/.config/chronicle/config.toml` and serves the web UI on port `12345`.
+Chronicle records ASCII text file changes under 5 MB and keeps the last
+captured content when a tracked file is deleted. Hidden directories
+(`.`-prefixed) and paths ignored by each root's `.gitignore` are skipped.
 
 ```
 chronicle watch
@@ -46,9 +64,20 @@ chronicle watch
 
 On each change it prints the short SHA-256 hash and file path.
 
+### `web`
+
+Serves the web UI without starting the watcher.
+
+```
+chronicle web
+```
+
+Open <http://localhost:12345> to list, add, and delete monitored directories,
+view chronological change history for a directory, and inspect per-file diffs.
+
 ### `recent`
 
-Shows the 10 most recently changed files (grouped by file path).
+Shows the 10 most recently changed files across the central history database.
 
 ```
 chronicle recent
@@ -60,6 +89,7 @@ Shows the last 5 diffs for a given file.
 
 ```
 chronicle diffs path/to/file.go
+chronicle diffs -dir /path/to/root path/to/file.go
 ```
 
 ### `update`
@@ -80,9 +110,13 @@ chronicle help
 
 ## Data storage
 
-Chronicle keeps its data in `.chronicle/history.db` inside the directory where
-it runs. This is a SQLite database. Add `.chronicle/` to your `.gitignore` if
-you don't want to track it.
+Chronicle stores system-wide state under `~/.config/chronicle`:
+
+- `config.toml`: TOML config containing the monitored directory list.
+- `history.db`: central libSQL database containing file-change history.
+
+The web assets are embedded with Go's `embed` package, so Chronicle ships as a
+single binary. `go-libsql` uses CGO, so builds need `CGO_ENABLED=1`.
 
 ## Build & development
 

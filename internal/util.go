@@ -20,10 +20,6 @@ func IsAscii(path string) (bool, error) {
 		return false, err
 	}
 
-	if len(data) == 0 {
-		return false, nil
-	}
-
 	for _, b := range data {
 		if b >= 128 {
 			return false, nil
