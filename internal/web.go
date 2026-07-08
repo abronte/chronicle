@@ -23,10 +23,11 @@ type webApp struct {
 }
 
 type homePageData struct {
-	Title       string
-	CurrentPath string
-	Directories []directoryView
-	Error       string
+	Title          string
+	CurrentPath    string
+	Directories    []directoryView
+	IgnorePatterns []ignorePatternView
+	Error          string
 }
 
 type directoryPageData struct {
@@ -51,6 +52,10 @@ type filePageData struct {
 
 type directoryView struct {
 	Path string
+}
+
+type ignorePatternView struct {
+	Pattern string
 }
 
 type recentChangeView struct {
@@ -126,6 +131,8 @@ func NewWebHandler() http.Handler {
 	mux.HandleFunc("/", app.handleHome)
 	mux.HandleFunc("/directories", app.handleAddDirectory)
 	mux.HandleFunc("/directories/delete", app.handleDeleteDirectory)
+	mux.HandleFunc("/ignore-patterns", app.handleAddIgnorePattern)
+	mux.HandleFunc("/ignore-patterns/delete", app.handleDeleteIgnorePattern)
 	mux.HandleFunc("/history", app.handleDirectoryHistory)
 	mux.HandleFunc("/file", app.handleFileHistory)
 	return mux
@@ -169,6 +176,38 @@ func (app *webApp) handleDeleteDirectory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if _, err := RemoveMonitoredDirectory(r.FormValue("path")); err != nil {
+		app.renderHome(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (app *webApp) handleAddIgnorePattern(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		app.renderHome(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := AddIgnorePattern(r.FormValue("pattern")); err != nil {
+		app.renderHome(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (app *webApp) handleDeleteIgnorePattern(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		app.renderHome(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := RemoveIgnorePattern(r.FormValue("pattern")); err != nil {
 		app.renderHome(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -265,12 +304,17 @@ func (app *webApp) renderHome(w http.ResponseWriter, status int, message string)
 	for _, dir := range cfg.Directories {
 		dirs = append(dirs, directoryView{Path: dir})
 	}
+	var patterns []ignorePatternView
+	for _, pattern := range cfg.IgnorePatterns {
+		patterns = append(patterns, ignorePatternView{Pattern: pattern})
+	}
 	currentPath, _ := filepath.Abs(".")
 	app.render(w, status, "home", homePageData{
-		Title:       "Chronicle",
-		CurrentPath: currentPath,
-		Directories: dirs,
-		Error:       message,
+		Title:          "Chronicle",
+		CurrentPath:    currentPath,
+		Directories:    dirs,
+		IgnorePatterns: patterns,
+		Error:          message,
 	})
 }
 

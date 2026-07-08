@@ -50,6 +50,37 @@
       <p class="empty">No directories are monitored yet.</p>
       {{end}}
     </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>Global Ignore Patterns</h2>
+          <p>Gitignore-style patterns skipped under every monitored directory.</p>
+        </div>
+      </div>
+      <form class="add-form" action="/ignore-patterns" method="post">
+        <label for="pattern">Ignore pattern</label>
+        <div class="form-row">
+          <input id="pattern" name="pattern" type="text" placeholder="*.ndjson" autocomplete="off" required>
+          <button type="submit">Add</button>
+        </div>
+      </form>
+      {{if .IgnorePatterns}}
+      <div class="ignore-list">
+        {{range .IgnorePatterns}}
+        <div class="ignore-item">
+          <code class="pattern-text">{{.Pattern}}</code>
+          <form action="/ignore-patterns/delete" method="post">
+            <input type="hidden" name="pattern" value="{{.Pattern}}">
+            <button class="secondary danger" type="submit">Delete</button>
+          </form>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="empty form-empty">No global ignore patterns are configured.</p>
+      {{end}}
+    </section>
   </main>
 </body>
 </html>

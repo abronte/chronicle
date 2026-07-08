@@ -65,7 +65,7 @@ func TestInitializeDBAtMigratesLegacyChangesTable(t *testing.T) {
 	})
 
 	dbPath := filepath.Join(t.TempDir(), historyName)
-	legacy, err := sql.Open("libsql", localLibSQLDSN(dbPath))
+	legacy, err := sql.Open("turso", localTursoDSN(dbPath))
 	if err != nil {
 		t.Fatalf("open legacy db failed: %v", err)
 	}

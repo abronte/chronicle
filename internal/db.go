@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/tursodatabase/go-libsql"
+	_ "turso.tech/database/tursogo"
 )
 
 var db *sql.DB
@@ -49,7 +49,7 @@ func InitializeDBAt(dbPath string) error {
 	}
 
 	var err error
-	db, err = sql.Open("libsql", localLibSQLDSN(dbPath))
+	db, err = sql.Open("turso", localTursoDSN(dbPath))
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
@@ -370,8 +370,8 @@ func AddDeleteForDirectory(directoryPath, filePath string) (string, error) {
 	return sha, nil
 }
 
-func localLibSQLDSN(path string) string {
-	return "file:" + filepath.Clean(path)
+func localTursoDSN(path string) string {
+	return filepath.Clean(path)
 }
 
 func normalizeTrackedFilePath(directoryPath, filePath string) (string, string, error) {

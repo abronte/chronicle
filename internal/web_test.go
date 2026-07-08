@@ -72,6 +72,52 @@ func TestWebCanAddListAndDeleteDirectories(t *testing.T) {
 	}
 }
 
+func TestWebCanAddListAndDeleteIgnorePatterns(t *testing.T) {
+	handler := setupWebTest(t)
+
+	form := url.Values{"pattern": {"*.ndjson"}}
+	req := httptest.NewRequest(http.MethodPost, "/ignore-patterns", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect after add, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, "Global Ignore Patterns") || !strings.Contains(body, "*.ndjson") {
+		t.Fatalf("home page should list ignore pattern, got:\n%s", body)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(cfg.IgnorePatterns) != 1 || cfg.IgnorePatterns[0] != "*.ndjson" {
+		t.Fatalf("expected ignore pattern in config, got %v", cfg.IgnorePatterns)
+	}
+
+	form = url.Values{"pattern": {"*.ndjson"}}
+	req = httptest.NewRequest(http.MethodPost, "/ignore-patterns/delete", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect after delete, got %d", rec.Code)
+	}
+
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(cfg.IgnorePatterns) != 0 {
+		t.Fatalf("expected ignore pattern to be deleted, got %v", cfg.IgnorePatterns)
+	}
+}
+
 func TestWebShowsDirectoryHistoryAndFileDiff(t *testing.T) {
 	handler := setupWebTest(t)
 	root := t.TempDir()

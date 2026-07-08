@@ -58,6 +58,34 @@ func TestHandleEventRecordsEmptyFileCreation(t *testing.T) {
 	}
 }
 
+func TestHandleEventSkipsGlobalIgnorePattern(t *testing.T) {
+	setupTestDB(t)
+
+	root := t.TempDir()
+	filePath := filepath.Join(root, "events.ndjson")
+	if err := os.WriteFile(filePath, []byte(`{"event":"skip"}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := &watchState{
+		roots: map[string]*watchedRoot{
+			root: {path: root, patterns: compileIgnorePatterns([]string{"*.ndjson"})},
+		},
+		watchedDirs: map[string]string{},
+	}
+
+	var buf bytes.Buffer
+	state.HandleEvent(fsnotify.Event{Name: filePath, Op: fsnotify.Create}, &buf)
+
+	changes, err := GetDirectoryChanges(root, 10)
+	if err != nil {
+		t.Fatalf("GetDirectoryChanges failed: %v", err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("expected ignored file to record no changes, got %d", len(changes))
+	}
+}
+
 func TestHandleEventRecordsKnownFileDeletion(t *testing.T) {
 	setupTestDB(t)
 
@@ -449,5 +477,46 @@ func TestAddDirsRecursiveSkipsGitignore(t *testing.T) {
 	}
 	if !found {
 		t.Error("should watch non-ignored src dir")
+	}
+}
+
+func TestWatchStateSyncAppliesGlobalIgnorePatterns(t *testing.T) {
+	dir := t.TempDir()
+
+	src := filepath.Join(dir, "src")
+	dist := filepath.Join(dir, "dist")
+	for _, d := range []string{src, dist} {
+		if err := os.Mkdir(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watcher.Close()
+
+	state := newWatchState(watcher)
+	if err := state.Sync(Config{Directories: []string{dir}}); err != nil {
+		t.Fatalf("initial Sync failed: %v", err)
+	}
+
+	absDist, _ := filepath.Abs(dist)
+	if !slices.Contains(watcher.WatchList(), absDist) {
+		t.Fatalf("expected dist to be watched before global ignore, got %v", watcher.WatchList())
+	}
+
+	if err := state.Sync(Config{Directories: []string{dir}, IgnorePatterns: []string{"dist/"}}); err != nil {
+		t.Fatalf("ignored Sync failed: %v", err)
+	}
+
+	watched := watcher.WatchList()
+	if slices.Contains(watched, absDist) {
+		t.Fatalf("expected dist to be removed after global ignore, got %v", watched)
+	}
+	absSrc, _ := filepath.Abs(src)
+	if !slices.Contains(watched, absSrc) {
+		t.Fatalf("expected src to remain watched, got %v", watched)
 	}
 }

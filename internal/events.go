@@ -95,7 +95,7 @@ func Watch(args []string, stdout io.Writer) error {
 			fmt.Fprintf(stdout, "chronicle: load config: %v\n", err)
 			return
 		}
-		if err := state.Sync(cfg.Directories); err != nil {
+		if err := state.Sync(cfg); err != nil {
 			fmt.Fprintf(stdout, "chronicle: sync watched directories: %v\n", err)
 		}
 	}
@@ -209,6 +209,21 @@ func gitignoreToRegex(pattern string) *regexp.Regexp {
 	return regexp.MustCompile(prefix + escaped + suffix)
 }
 
+func compileIgnorePatterns(patterns []string) []*regexp.Regexp {
+	var result []*regexp.Regexp
+	for _, pattern := range uniqueIgnorePatterns(patterns) {
+		re := gitignoreToRegex(pattern)
+		if re != nil {
+			result = append(result, re)
+		}
+	}
+	return result
+}
+
+func ignorePatternsKey(patterns []string) string {
+	return strings.Join(uniqueIgnorePatterns(patterns), "\x00")
+}
+
 func addDirsRecursive(watcher *fsnotify.Watcher, root string) error {
 	return addDirsRecursiveWithPatterns(watcher, root, gitignorePatterns)
 }
@@ -234,8 +249,9 @@ func addDirsRecursiveWithPatterns(watcher *fsnotify.Watcher, root string, patter
 }
 
 type watchedRoot struct {
-	path     string
-	patterns []*regexp.Regexp
+	path            string
+	patterns        []*regexp.Regexp
+	globalIgnoreKey string
 }
 
 type watchState struct {
@@ -252,11 +268,13 @@ func newWatchState(watcher *fsnotify.Watcher) *watchState {
 	}
 }
 
-func (s *watchState) Sync(dirs []string) error {
+func (s *watchState) Sync(cfg Config) error {
 	targets := map[string]bool{}
 	var firstErr error
+	globalPatterns := uniqueIgnorePatterns(cfg.IgnorePatterns)
+	globalIgnoreKey := ignorePatternsKey(globalPatterns)
 
-	for _, dir := range dirs {
+	for _, dir := range cfg.Directories {
 		normalized, err := NormalizeDirectoryPath(dir, true)
 		if err != nil {
 			if firstErr == nil {
@@ -267,8 +285,8 @@ func (s *watchState) Sync(dirs []string) error {
 		targets[normalized] = true
 	}
 
-	for root := range s.roots {
-		if !targets[root] {
+	for root, watched := range s.roots {
+		if !targets[root] || watched.globalIgnoreKey != globalIgnoreKey {
 			s.removeRoot(root)
 		}
 	}
@@ -282,7 +300,7 @@ func (s *watchState) Sync(dirs []string) error {
 		if _, ok := s.roots[root]; ok {
 			continue
 		}
-		if err := s.addRoot(root); err != nil && firstErr == nil {
+		if err := s.addRoot(root, globalPatterns); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -290,12 +308,17 @@ func (s *watchState) Sync(dirs []string) error {
 	return firstErr
 }
 
-func (s *watchState) addRoot(root string) error {
+func (s *watchState) addRoot(root string, globalPatterns []string) error {
 	patterns, err := loadGitignorePatterns(root)
 	if err != nil {
 		return fmt.Errorf("load gitignore for %s: %w", root, err)
 	}
-	watched := &watchedRoot{path: root, patterns: patterns}
+	combinedPatterns := append(compileIgnorePatterns(globalPatterns), patterns...)
+	watched := &watchedRoot{
+		path:            root,
+		patterns:        combinedPatterns,
+		globalIgnoreKey: ignorePatternsKey(globalPatterns),
+	}
 	s.roots[root] = watched
 	if err := s.addDirsRecursive(watched, root); err != nil {
 		return err
