@@ -1,8 +1,8 @@
 # Chronicle
 
 A system-wide file change tracker. Chronicle watches the directories you
-configure, stores text-file changes in a central libSQL database, and includes a
-web UI for managing watched directories and reviewing history.
+configure, stores text-file changes in a central Turso database, and includes a
+web UI for managing watched directories, global ignore patterns, and history.
 
 ## Quick start
 
@@ -56,7 +56,8 @@ Starts file watchers for every directory listed in
 `~/.config/chronicle/config.toml` and serves the web UI on port `12345`.
 Chronicle records ASCII text file changes under 5 MB and keeps the last
 captured content when a tracked file is deleted. Hidden directories
-(`.`-prefixed) and paths ignored by each root's `.gitignore` are skipped.
+(`.`-prefixed), paths ignored by each root's `.gitignore`, and paths matching
+global `ignore_patterns` from `config.toml` are skipped.
 
 ```
 chronicle watch
@@ -72,8 +73,9 @@ Serves the web UI without starting the watcher.
 chronicle web
 ```
 
-Open <http://localhost:12345> to list, add, and delete monitored directories,
-view chronological change history for a directory, and inspect per-file diffs.
+Open <http://localhost:12345> to list, add, and delete monitored directories
+and global ignore patterns, view chronological change history for a directory,
+and inspect per-file diffs.
 
 ### `recent`
 
@@ -112,11 +114,12 @@ chronicle help
 
 Chronicle stores system-wide state under `~/.config/chronicle`:
 
-- `config.toml`: TOML config containing the monitored directory list.
-- `history.db`: central libSQL database containing file-change history.
+- `config.toml`: TOML config containing monitored directories and global
+  ignore patterns.
+- `history.db`: central Turso database containing file-change history.
 
 The web assets are embedded with Go's `embed` package, so Chronicle ships as a
-single binary. `go-libsql` uses CGO, so builds need `CGO_ENABLED=1`.
+single binary.
 
 ## Build & development
 

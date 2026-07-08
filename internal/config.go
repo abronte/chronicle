@@ -16,7 +16,8 @@ const (
 )
 
 type Config struct {
-	Directories []string
+	Directories    []string
+	IgnorePatterns []string
 }
 
 func ChronicleDir() (string, error) {
@@ -73,6 +74,7 @@ func LoadConfigAt(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
 	cfg.Directories = uniqueDirectories(cfg.Directories)
+	cfg.IgnorePatterns = uniqueIgnorePatterns(cfg.IgnorePatterns)
 	return cfg, nil
 }
 
@@ -90,12 +92,20 @@ func SaveConfigAt(path string, cfg Config) error {
 	}
 
 	cfg.Directories = uniqueDirectories(cfg.Directories)
+	cfg.IgnorePatterns = uniqueIgnorePatterns(cfg.IgnorePatterns)
 	var sb strings.Builder
 	sb.WriteString("# Chronicle system-wide configuration.\n")
 	sb.WriteString("directories = [\n")
 	for _, dir := range cfg.Directories {
 		sb.WriteString("  ")
 		sb.WriteString(strconv.Quote(dir))
+		sb.WriteString(",\n")
+	}
+	sb.WriteString("]\n")
+	sb.WriteString("\nignore_patterns = [\n")
+	for _, pattern := range cfg.IgnorePatterns {
+		sb.WriteString("  ")
+		sb.WriteString(strconv.Quote(pattern))
 		sb.WriteString(",\n")
 	}
 	sb.WriteString("]\n")
@@ -153,6 +163,53 @@ func RemoveMonitoredDirectory(path string) (Config, error) {
 	return cfg, nil
 }
 
+func AddIgnorePattern(pattern string) (Config, error) {
+	pattern, err := NormalizeIgnorePattern(pattern)
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		return Config{}, err
+	}
+	for _, existing := range cfg.IgnorePatterns {
+		if existing == pattern {
+			return cfg, nil
+		}
+	}
+	cfg.IgnorePatterns = append(cfg.IgnorePatterns, pattern)
+	if err := SaveConfig(cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func RemoveIgnorePattern(pattern string) (Config, error) {
+	pattern, err := NormalizeIgnorePattern(pattern)
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		return Config{}, err
+	}
+
+	next := cfg.IgnorePatterns[:0]
+	for _, existing := range cfg.IgnorePatterns {
+		normalized, err := NormalizeIgnorePattern(existing)
+		if err != nil || normalized != pattern {
+			next = append(next, existing)
+		}
+	}
+	cfg.IgnorePatterns = slices.Clone(next)
+	if err := SaveConfig(cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
 func NormalizeDirectoryPath(path string, requireExists bool) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -189,11 +246,21 @@ func NormalizeDirectoryPath(path string, requireExists bool) (string, error) {
 	return abs, nil
 }
 
+func NormalizeIgnorePattern(pattern string) (string, error) {
+	pattern = filepath.ToSlash(strings.TrimSpace(pattern))
+	if pattern == "" {
+		return "", fmt.Errorf("ignore pattern required")
+	}
+	if strings.HasPrefix(pattern, "!") {
+		return "", fmt.Errorf("negated ignore patterns are not supported")
+	}
+	return pattern, nil
+}
+
 func parseConfig(data []byte) (Config, error) {
 	var cfg Config
 	lines := strings.Split(string(data), "\n")
-	inDirectories := false
-	seenDirectories := false
+	arrayKey := ""
 
 	for _, line := range lines {
 		line = strings.TrimSpace(stripTOMLComment(line))
@@ -201,48 +268,54 @@ func parseConfig(data []byte) (Config, error) {
 			continue
 		}
 
-		if inDirectories {
+		if arrayKey != "" {
 			values, err := parseQuotedValues(line)
 			if err != nil {
 				return Config{}, err
 			}
-			cfg.Directories = append(cfg.Directories, values...)
+			appendConfigValues(&cfg, arrayKey, values)
 			if strings.Contains(line, "]") {
-				inDirectories = false
+				arrayKey = ""
 			}
 			continue
 		}
 
-		if !strings.HasPrefix(line, "directories") {
+		key, value, ok := strings.Cut(line, "=")
+		key = strings.TrimSpace(key)
+		if key != "directories" && key != "ignore_patterns" {
 			continue
 		}
 
-		key, value, ok := strings.Cut(line, "=")
-		if !ok || strings.TrimSpace(key) != "directories" {
-			return Config{}, fmt.Errorf("invalid directories assignment")
+		if !ok {
+			return Config{}, fmt.Errorf("invalid %s assignment", key)
 		}
-		seenDirectories = true
 		value = strings.TrimSpace(value)
 		if !strings.HasPrefix(value, "[") {
-			return Config{}, fmt.Errorf("directories must be a TOML array")
+			return Config{}, fmt.Errorf("%s must be a TOML array", key)
 		}
 		values, err := parseQuotedValues(value)
 		if err != nil {
 			return Config{}, err
 		}
-		cfg.Directories = append(cfg.Directories, values...)
+		appendConfigValues(&cfg, key, values)
 		if !strings.Contains(value, "]") {
-			inDirectories = true
+			arrayKey = key
 		}
 	}
 
-	if inDirectories {
-		return Config{}, fmt.Errorf("unterminated directories array")
-	}
-	if !seenDirectories {
-		cfg.Directories = nil
+	if arrayKey != "" {
+		return Config{}, fmt.Errorf("unterminated %s array", arrayKey)
 	}
 	return cfg, nil
+}
+
+func appendConfigValues(cfg *Config, key string, values []string) {
+	switch key {
+	case "directories":
+		cfg.Directories = append(cfg.Directories, values...)
+	case "ignore_patterns":
+		cfg.IgnorePatterns = append(cfg.IgnorePatterns, values...)
+	}
 }
 
 func stripTOMLComment(line string) string {
@@ -318,6 +391,20 @@ func uniqueDirectories(dirs []string) []string {
 		}
 		seen[dir] = true
 		result = append(result, dir)
+	}
+	return result
+}
+
+func uniqueIgnorePatterns(patterns []string) []string {
+	seen := map[string]bool{}
+	var result []string
+	for _, pattern := range patterns {
+		pattern = filepath.ToSlash(strings.TrimSpace(pattern))
+		if pattern == "" || seen[pattern] {
+			continue
+		}
+		seen[pattern] = true
+		result = append(result, pattern)
 	}
 	return result
 }

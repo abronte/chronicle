@@ -33,20 +33,18 @@ jobs:
             goos: linux
             goarch: amd64
             output: chronicle-linux-amd64
-            cc: gcc
-            apt_packages: ""
           - runner: ubuntu-latest
             goos: linux
             goarch: arm64
             output: chronicle-linux-arm64
-            cc: aarch64-linux-gnu-gcc
-            apt_packages: gcc-aarch64-linux-gnu
+          - runner: macos-latest
+            goos: darwin
+            goarch: amd64
+            output: chronicle-darwin-amd64
           - runner: macos-latest
             goos: darwin
             goarch: arm64
             output: chronicle-darwin-arm64
-            cc: clang
-            apt_packages: ""
 
     steps:
       - name: Check out repository
@@ -57,18 +55,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install Linux cross compiler
-        if: ${{ matrix.apt_packages != '' }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ matrix.apt_packages }}
-
       - name: Build binary
         env:
-          CGO_ENABLED: "1"
+          CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CC: ${{ matrix.cc }}
         run: |
           mkdir -p dist
           go build \

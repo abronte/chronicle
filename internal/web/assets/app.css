@@ -217,7 +217,23 @@ button.secondary.danger:hover {
   gap: 10px;
 }
 
+.ignore-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .directory-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.ignore-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -230,6 +246,17 @@ button.secondary.danger:hover {
 .path-link {
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.pattern-text {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+}
+
+.form-empty {
+  margin-top: 14px;
 }
 
 .two-column {
@@ -431,6 +458,7 @@ td {
 
   .form-row,
   .directory-item,
+  .ignore-item,
   .two-column,
   .file-layout {
     grid-template-columns: 1fr;

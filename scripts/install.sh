@@ -19,7 +19,7 @@ detect_asset() {
 		Linux) os="linux" ;;
 		Darwin) os="darwin" ;;
 		MINGW*|MSYS*|CYGWIN*)
-			echo "Error: Windows releases are not available because go-libsql does not support Windows." >&2
+			echo "Error: Windows releases are not available." >&2
 			exit 1
 			;;
 		*)
@@ -36,11 +36,6 @@ detect_asset() {
 			exit 1
 			;;
 	esac
-
-	if [[ "$os" == "darwin" && "$arch" != "arm64" ]]; then
-		echo "Error: macOS releases are only available for arm64 because go-libsql does not provide a darwin/amd64 library." >&2
-		exit 1
-	fi
 
 	printf '%s-%s-%s\n' "$BINARY_NAME" "$os" "$arch"
 }
