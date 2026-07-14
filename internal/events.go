@@ -430,6 +430,9 @@ func (s *watchState) handleDeleteEvent(root *watchedRoot, path string, stdout io
 		s.removeWatchedDirTree(path)
 		return
 	}
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return
+	}
 
 	sha, err := AddDeleteForDirectory(root.path, path)
 	if err != nil {

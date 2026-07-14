@@ -94,6 +94,34 @@ chronicle diffs path/to/file.go
 chronicle diffs -dir /path/to/root path/to/file.go
 ```
 
+### `restore`
+
+Restores the latest recorded contents for a file. Relative paths are resolved
+from the current working directory, so the restored file is matched to its
+exact monitored path even when multiple roots contain the same relative file.
+
+```
+chronicle restore path/to/file.go
+```
+
+Use `-version` with a full SHA or unique SHA prefix shown by the web UI or
+`diffs` command to restore a specific version:
+
+```
+chronicle restore -version a1b2c3d4 path/to/file.go
+```
+
+Chronicle recreates missing parent directories and atomically replaces an
+existing target. The command uses the running local web service when available
+so it works while the watcher holds the history database open. If the watcher
+uses a custom web address, pass the same address to restore (development uses
+port `12346`). Restart a watcher that was started by an older Chronicle version
+once after upgrading so the restore API is available:
+
+```
+chronicle restore -addr :12346 path/to/file.go
+```
+
 ### `update`
 
 Downloads the latest release from GitHub and replaces the current binary.

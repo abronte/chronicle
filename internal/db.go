@@ -166,6 +166,63 @@ func GetFileHistoryForDirectory(directoryPath, filePath string, limit int) ([]Fi
 	return scanFileChanges(rows)
 }
 
+func GetFileVersion(filePath, version string) (FileChange, error) {
+	if db == nil {
+		return FileChange{}, fmt.Errorf("database not initialized")
+	}
+
+	abs, err := NormalizeFilePath(filePath)
+	if err != nil {
+		return FileChange{}, err
+	}
+
+	version, err = normalizeVersion(version)
+	if err != nil {
+		return FileChange{}, err
+	}
+
+	if version == "" {
+		row := db.QueryRow(
+			`SELECT id, directory_path, file_path, absolute_path, sha, previous, data, change_type, created_at FROM changes
+			 WHERE absolute_path = ?
+			 ORDER BY id DESC
+			 LIMIT 1`, abs)
+		change, err := scanFileChange(row)
+		if err == sql.ErrNoRows {
+			return FileChange{}, fmt.Errorf("no changes recorded for %s", abs)
+		}
+		if err != nil {
+			return FileChange{}, fmt.Errorf("query latest file version: %w", err)
+		}
+		return change, nil
+	}
+
+	rows, err := db.Query(
+		`SELECT id, directory_path, file_path, absolute_path, sha, previous, data, change_type, created_at FROM changes
+		 WHERE absolute_path = ? AND substr(sha, 1, ?) = ?
+		 ORDER BY id DESC`, abs, len(version), version)
+	if err != nil {
+		return FileChange{}, fmt.Errorf("query file version: %w", err)
+	}
+	defer rows.Close()
+
+	changes, err := scanFileChanges(rows)
+	if err != nil {
+		return FileChange{}, err
+	}
+	if len(changes) == 0 {
+		return FileChange{}, fmt.Errorf("version %s not found for %s", version, abs)
+	}
+
+	selected := changes[0]
+	for _, change := range changes[1:] {
+		if change.SHA != selected.SHA {
+			return FileChange{}, fmt.Errorf("version prefix %s is ambiguous for %s", version, abs)
+		}
+	}
+	return selected, nil
+}
+
 func GetRecentChanges(limit int) ([]RecentChange, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database not initialized")
@@ -402,6 +459,47 @@ func normalizeQueryFilePath(filePath string) string {
 		return filepath.ToSlash(filepath.Clean(filePath))
 	}
 	return filepath.ToSlash(filepath.Clean(filePath))
+}
+
+func NormalizeFilePath(filePath string) (string, error) {
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return "", fmt.Errorf("file path required")
+	}
+
+	if filePath == "~" || strings.HasPrefix(filePath, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("find home directory: %w", err)
+		}
+		if filePath == "~" {
+			filePath = home
+		} else {
+			filePath = filepath.Join(home, strings.TrimPrefix(filePath, "~/"))
+		}
+	}
+
+	abs, err := filepath.Abs(filePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve file path: %w", err)
+	}
+	return filepath.Clean(abs), nil
+}
+
+func normalizeVersion(version string) (string, error) {
+	version = strings.ToLower(strings.TrimSpace(version))
+	if version == "" {
+		return "", nil
+	}
+	if len(version) > sha256.Size*2 {
+		return "", fmt.Errorf("version must be a SHA or SHA prefix")
+	}
+	for _, char := range version {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return "", fmt.Errorf("version must be a SHA or SHA prefix")
+		}
+	}
+	return version, nil
 }
 
 func scanFileChanges(rows *sql.Rows) ([]FileChange, error) {

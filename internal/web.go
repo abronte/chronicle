@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -13,7 +14,12 @@ import (
 	"time"
 )
 
-const DefaultWebAddress = ":12345"
+const (
+	DefaultWebAddress        = ":12345"
+	FileVersionAPIPath       = "/api/file-version"
+	FileVersionAPIHeader     = "X-Chronicle-API"
+	FileVersionAPIHeaderName = "file-version"
+)
 
 //go:embed web/templates/*.html web/assets/*
 var webFS embed.FS
@@ -101,6 +107,12 @@ type diffFileData struct {
 	Contents string `json:"contents"`
 }
 
+type FileVersionResponse struct {
+	AbsolutePath string `json:"absolute_path"`
+	SHA          string `json:"sha"`
+	Data         string `json:"data"`
+}
+
 func ServeWeb(addr string) error {
 	if strings.TrimSpace(addr) == "" {
 		addr = DefaultWebAddress
@@ -135,6 +147,7 @@ func NewWebHandler() http.Handler {
 	mux.HandleFunc("/ignore-patterns/delete", app.handleDeleteIgnorePattern)
 	mux.HandleFunc("/history", app.handleDirectoryHistory)
 	mux.HandleFunc("/file", app.handleFileHistory)
+	mux.HandleFunc(FileVersionAPIPath, app.handleFileVersion)
 	return mux
 }
 
@@ -292,6 +305,43 @@ func (app *webApp) handleFileHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.renderFile(w, http.StatusOK, dir, filePath, toFileChangeViews(changes), selected.ID, showFull, diffData, full, "")
+}
+
+func (app *webApp) handleFileVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(FileVersionAPIHeader, FileVersionAPIHeaderName)
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requestIsLoopback(r) {
+		http.NotFound(w, r)
+		return
+	}
+
+	change, err := GetFileVersion(r.URL.Query().Get("path"), r.URL.Query().Get("version"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(FileVersionResponse{
+		AbsolutePath: change.AbsolutePath,
+		SHA:          change.SHA,
+		Data:         change.Data,
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func requestIsLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (app *webApp) renderHome(w http.ResponseWriter, status int, message string) {

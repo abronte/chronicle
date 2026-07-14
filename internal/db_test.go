@@ -3,6 +3,7 @@ package internal
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -328,6 +329,116 @@ func TestGetFileHistoryEmpty(t *testing.T) {
 	}
 }
 
+func TestGetFileVersionReturnsLatestDeleteWithRetainedContent(t *testing.T) {
+	setupTestDB(t)
+
+	root := t.TempDir()
+	filePath := filepath.Join(root, "deleted.txt")
+	addChangeWithDelayForDirectory(t, root, filePath, "restorable contents\n")
+	deleteSHA, err := AddDeleteForDirectory(root, filePath)
+	if err != nil {
+		t.Fatalf("AddDeleteForDirectory failed: %v", err)
+	}
+
+	change, err := GetFileVersion(filePath, "")
+	if err != nil {
+		t.Fatalf("GetFileVersion failed: %v", err)
+	}
+	if change.SHA != deleteSHA {
+		t.Fatalf("expected latest delete sha %q, got %q", deleteSHA, change.SHA)
+	}
+	if change.ChangeType != ChangeTypeDelete {
+		t.Fatalf("expected change type %q, got %q", ChangeTypeDelete, change.ChangeType)
+	}
+	if change.Data != "restorable contents\n" {
+		t.Fatalf("expected retained contents, got %q", change.Data)
+	}
+	if change.AbsolutePath != filePath {
+		t.Fatalf("expected absolute path %q, got %q", filePath, change.AbsolutePath)
+	}
+}
+
+func TestGetFileVersionSelectsFullAndShortSHA(t *testing.T) {
+	setupTestDB(t)
+
+	root := t.TempDir()
+	filePath := filepath.Join(root, "versioned.txt")
+	firstSHA := addChangeWithDelayForDirectory(t, root, filePath, "first version")
+	secondSHA := addChangeWithDelayForDirectory(t, root, filePath, "second version")
+
+	first, err := GetFileVersion(filePath, firstSHA)
+	if err != nil {
+		t.Fatalf("GetFileVersion with full SHA failed: %v", err)
+	}
+	if first.SHA != firstSHA || first.Data != "first version" {
+		t.Fatalf("expected first version %q, got sha %q and data %q", firstSHA, first.SHA, first.Data)
+	}
+
+	second, err := GetFileVersion(filePath, strings.ToUpper(secondSHA[:12]))
+	if err != nil {
+		t.Fatalf("GetFileVersion with short SHA failed: %v", err)
+	}
+	if second.SHA != secondSHA || second.Data != "second version" {
+		t.Fatalf("expected second version %q, got sha %q and data %q", secondSHA, second.SHA, second.Data)
+	}
+}
+
+func TestGetFileVersionScopesLookupToExactAbsolutePath(t *testing.T) {
+	setupTestDB(t)
+
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+	firstPath := filepath.Join(firstRoot, "src", "shared.go")
+	secondPath := filepath.Join(secondRoot, "src", "shared.go")
+	firstSHA := addChangeWithDelayForDirectory(t, firstRoot, firstPath, "first root")
+	secondSHA := addChangeWithDelayForDirectory(t, secondRoot, secondPath, "second root")
+
+	first, err := GetFileVersion(firstPath, "")
+	if err != nil {
+		t.Fatalf("GetFileVersion for first root failed: %v", err)
+	}
+	if first.AbsolutePath != firstPath || first.SHA != firstSHA || first.Data != "first root" {
+		t.Fatalf("unexpected first-root version: %#v", first)
+	}
+
+	second, err := GetFileVersion(secondPath, "")
+	if err != nil {
+		t.Fatalf("GetFileVersion for second root failed: %v", err)
+	}
+	if second.AbsolutePath != secondPath || second.SHA != secondSHA || second.Data != "second root" {
+		t.Fatalf("unexpected second-root version: %#v", second)
+	}
+
+	if _, err := GetFileVersion(firstPath, secondSHA); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected second-root SHA to be missing for first path, got %v", err)
+	}
+}
+
+func TestGetFileVersionRejectsAmbiguousInvalidAndMissingVersions(t *testing.T) {
+	setupTestDB(t)
+
+	root := t.TempDir()
+	filePath := filepath.Join(root, "ambiguous.txt")
+	firstSHA := addChangeWithDelayForDirectory(t, root, filePath, "two")
+	secondSHA := addChangeWithDelayForDirectory(t, root, filePath, "seven")
+	if firstSHA[:1] != secondSHA[:1] {
+		t.Fatalf("test fixture SHAs must share a prefix: %q and %q", firstSHA, secondSHA)
+	}
+
+	if _, err := GetFileVersion(filePath, firstSHA[:1]); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguous prefix error, got %v", err)
+	}
+	if _, err := GetFileVersion(filePath, "not-a-sha"); err == nil || !strings.Contains(err.Error(), "SHA or SHA prefix") {
+		t.Fatalf("expected invalid version error, got %v", err)
+	}
+	if _, err := GetFileVersion(filePath, strings.Repeat("f", 64)); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected missing version error, got %v", err)
+	}
+	if _, err := GetFileVersion(filepath.Join(root, "missing.txt"), ""); err == nil || !strings.Contains(err.Error(), "no changes recorded") {
+		t.Fatalf("expected missing file history error, got %v", err)
+	}
+}
+
 func TestGetRecentChangesEmpty(t *testing.T) {
 	setupTestDB(t)
 
@@ -352,6 +463,11 @@ func TestDBFunctionsWithoutInit(t *testing.T) {
 	_, err = GetFileHistory("test.txt", 10)
 	if err == nil {
 		t.Error("expected error for uninitialized db")
+	}
+
+	_, err = GetFileVersion("test.txt", "")
+	if err == nil {
+		t.Error("expected GetFileVersion error for uninitialized db")
 	}
 }
 

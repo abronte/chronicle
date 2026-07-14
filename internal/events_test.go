@@ -130,6 +130,40 @@ func TestHandleEventRecordsKnownFileDeletion(t *testing.T) {
 	}
 }
 
+func TestHandleEventSkipsRenameDeleteWhenFileStillExists(t *testing.T) {
+	setupTestDB(t)
+
+	root := t.TempDir()
+	filePath := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(filePath, []byte("replacement\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AddChangeForDirectory(root, filePath, "original\n"); err != nil {
+		t.Fatalf("AddChangeForDirectory failed: %v", err)
+	}
+
+	state := &watchState{
+		roots: map[string]*watchedRoot{
+			root: {path: root},
+		},
+		watchedDirs: map[string]string{},
+	}
+
+	var buf bytes.Buffer
+	state.HandleEvent(fsnotify.Event{Name: filePath, Op: fsnotify.Rename}, &buf)
+
+	changes, err := GetFileHistoryForDirectory(root, "note.txt", 10)
+	if err != nil {
+		t.Fatalf("GetFileHistoryForDirectory failed: %v", err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected no false delete row for an atomic replacement, got %d changes", len(changes))
+	}
+	if changes[0].ChangeType != ChangeTypeModify {
+		t.Fatalf("expected original modify row, got %q", changes[0].ChangeType)
+	}
+}
+
 func TestHandleEventSkipsDeletedWatchedDirectory(t *testing.T) {
 	setupTestDB(t)
 

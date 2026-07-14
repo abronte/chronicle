@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -251,6 +252,56 @@ func TestWebShowsDeletedFileHistoryAndDiff(t *testing.T) {
 	if !strings.Contains(body, `"oldFile":{"name":"notes.txt","contents":"hello\nworld\n"`) ||
 		!strings.Contains(body, `"newFile":{"name":"notes.txt","contents":""}`) {
 		t.Fatalf("file page should expose deleted file contents as old file data:\n%s", body)
+	}
+}
+
+func TestFileVersionAPIReturnsVersionToLoopbackRequest(t *testing.T) {
+	handler := setupWebTest(t)
+	root := t.TempDir()
+	filePath := filepath.Join(root, "restore.txt")
+	sha := addChangeWithDelayForDirectory(t, root, filePath, "saved version\n")
+
+	query := url.Values{
+		"path":    {filePath},
+		"version": {sha[:12]},
+	}
+	req := httptest.NewRequest(http.MethodGet, FileVersionAPIPath+"?"+query.Encode(), nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected file-version status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(FileVersionAPIHeader); got != FileVersionAPIHeaderName {
+		t.Fatalf("expected API marker header %q, got %q", FileVersionAPIHeaderName, got)
+	}
+
+	var response FileVersionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode file-version response: %v", err)
+	}
+	if response.AbsolutePath != filePath || response.SHA != sha || response.Data != "saved version\n" {
+		t.Fatalf("unexpected file-version response: %#v", response)
+	}
+}
+
+func TestFileVersionAPIRejectsNonLoopbackRequest(t *testing.T) {
+	handler := setupWebTest(t)
+	root := t.TempDir()
+	filePath := filepath.Join(root, "private.txt")
+	addChangeWithDelayForDirectory(t, root, filePath, "private history\n")
+
+	req := httptest.NewRequest(http.MethodGet, FileVersionAPIPath+"?path="+url.QueryEscape(filePath), nil)
+	req.RemoteAddr = "203.0.113.10:54321"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected non-loopback request to be rejected with 404, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "private history") {
+		t.Fatalf("non-loopback response exposed file contents: %q", rec.Body.String())
 	}
 }
 
